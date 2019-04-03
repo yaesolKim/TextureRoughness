@@ -1,0 +1,5 @@
+GIT repo: haptic rendering repository for ROS workspace
+
+1. connect two ethernet networks(COM_GR_KONI and CrossCable)
+2. In terminal 1, >> roscore
+3. In terminal 2, >> cd ros_ws >> sudo su >> source devel/setup.bash >> rosrun iiwa_tool_examples command_robot
