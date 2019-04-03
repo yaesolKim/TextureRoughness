@@ -28,7 +28,7 @@ import com.kuka.roboticsAPI.applicationModel.RoboticsAPIApplication;
 import com.kuka.roboticsAPI.deviceModel.JointPosition;
 import com.kuka.roboticsAPI.deviceModel.LBR;
 import com.kuka.roboticsAPI.geometricModel.CartDOF;
-//import com.kuka.roboticsAPI.geometricModel.ObjectFrame;
+import com.kuka.roboticsAPI.geometricModel.ObjectFrame;
 import com.kuka.roboticsAPI.geometricModel.Tool;
 import com.kuka.roboticsAPI.geometricModel.math.Transformation;
 import com.kuka.roboticsAPI.geometricModel.math.Vector;
@@ -50,9 +50,11 @@ import com.kuka.roboticsAPI.geometricModel.Frame;
 import com.kuka.common.ThreadUtil;
 
 public class TextureHwall extends RoboticsAPIApplication {
-
  private LBR robot;
  private Tool tool;
+ ObjectFrame tcp_tool;
+ private ObjectFrame hwall;
+ 
  private SmartServo motion;
  private Lock configureSmartServoLock = new ReentrantLock();
  private double initial_velocity = 0.05;
@@ -193,6 +195,12 @@ public class TextureHwall extends RoboticsAPIApplication {
 
  public void initialize() {
    robot = getContext().getDeviceFromType(LBR.class);
+   tool = getApplicationData().createFromTemplate("Tool");
+   tcp_tool = tool.getFrame("TCP");
+   hwall = tool.getFrame("HWALL");
+   tool.attachTo(robot.getFlange());
+   
+   
    getLogger().info("initial vel: " + initial_velocity );   
    robot.move(new PTP(new JointPosition(0, 0.523599, 0, -1.5708, 0, -0.523599, 0 )).setJointVelocityRel(initial_velocity));
    helper = new iiwaMessageGenen();
@@ -346,7 +354,8 @@ public class TextureHwall extends RoboticsAPIApplication {
               Vector force = data.getForce();
               double forceInZ = force.getZ();
               
-              if (robot.isReadyToMove() && (forceInZ > -2))
+              //if (robot.isReadyToMove() && (forceInZ > -2))
+              if (robot.isReadyToMove() && (forceInZ > 1))
             	  motion.getRuntime().setDestination(tr);
               
             }
