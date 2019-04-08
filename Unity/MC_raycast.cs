@@ -1,9 +1,10 @@
- //caculate orientation of the target wall using raycast
 //attatch this script to the main camera
+//caculate orientation of the target wall using raycast
+
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using System; //Math
+using System;
 
 public class MC_raycast : MonoBehaviour {
 	public Transform target_wall, proxy_wall;
@@ -19,7 +20,6 @@ public class MC_raycast : MonoBehaviour {
 
 	public bool touchable = false;
 
-	// Use this for initialization
 	void Start () {
 	}
 
@@ -34,7 +34,6 @@ public class MC_raycast : MonoBehaviour {
 			float degree = target_wall.transform.eulerAngles.y - proxy_base.transform.eulerAngles.y;
 			aa = degree;
 
-			//Debug.Log("degeree: " + degree);
 			if(aa < -180)
 			{
 				aa += 360;
@@ -145,17 +144,15 @@ public class MC_raycast : MonoBehaviour {
 				float xxx = (relPose.x/d)*(target_wall.transform.lossyScale.x/2);
 				float zzz = (relPose.z/d)*(target_wall.transform.lossyScale.z/2);
 
-				//predicted colision point -> sphere_test position
+				//set proxy wall configuration
+				//position
 				float p_col_x = target_wall.transform.position.x - xxx;
 				float p_col_z = target_wall.transform.position.z - zzz;
-
 				proxy_wall.transform.position = new Vector3(p_col_x, r_palm.transform.position.y, p_col_z);
-
-				//predicted colision point -> sphere_test orientation
+				//orientation
 				Vector3 direction_hit2 = proxy_wall.transform.position - r_palm.transform.position;
 				Physics.Raycast(r_palm.transform.position, direction_hit2, out hit2, 20.0f);
 				Debug.DrawRay(proxy_wall.transform.position, hit2.normal, Color.green);
-
 
 				Vector3 from = new Vector3(0, 0, -1); //proxy_base
 				Vector3 to = hit2.normal; //normal
@@ -181,11 +178,9 @@ public class MC_raycast : MonoBehaviour {
 
 			p_x = -1000*(proxy_wall.transform.localPosition.x);
 			p_y = 1000*proxy_wall.transform.localPosition.y;
-			p_z = 1000*(proxy_wall.transform.localPosition.z + 0.067f); //manual tuning
+			p_z = 1000*(proxy_wall.transform.localPosition.z + 0.067f); //iiwa base height
 
 			ori =  proxy_wall.transform.rotation.eulerAngles.y - proxy_base.transform.rotation.eulerAngles.y;
-
-
 		}
 
 		else
