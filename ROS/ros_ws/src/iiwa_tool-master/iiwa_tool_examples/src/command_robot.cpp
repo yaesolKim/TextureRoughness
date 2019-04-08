@@ -15,7 +15,7 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 
-// read reachable planefiles
+// read reachable plane files
 #include <iostream>
 #include <fstream>
 
@@ -23,8 +23,7 @@ using namespace std;
 
 //Socket comm
 #define BUF_SIZE 28
-#define portnum 9110
-
+#define portnum 9118
 //#define ros_rate 10.0
 #define threshold 0.2
 #define PI 3.14159265
@@ -39,14 +38,19 @@ std::string joint_position_topic, cartesian_position_topic, command_cartesian_po
 bool isRobotConnected = false, robotInit = false;
 bool use_cartesian_command = true;
 
-float ori = 180; //relative orientation between avatar and virtual wall
-float pos_x, pos_y, pos_z;
+float ori = 0; //relative orientation between avatar and virtual wall
+float pos_x, pos_y, pos_z, rough;
+float pos_x_old = 0, pos_y_old = 0, pos_z_old = 0;
+
+float tex_angle, tex_vel;
 bool compliant_control = false;
 
 void jointPositionCallback(const iiwa_msgs::JointPosition& jp);
 void cartesianPositionCallback(const geometry_msgs::PoseStamped& ps);
+//void avatarCallback(const geometry_msgs::PoseStamped& ps);
 void error_handling(const char * message); //Socket comm
-void setRobotPose(int ori, float x, float y, float z);
+void setRobotPose(int ori, float x, float y, float z, int r);
+bool checkReachability(int ori, float x, float y, float z);
 
 int main (int argc, char **argv)
 {
@@ -58,58 +62,47 @@ int main (int argc, char **argv)
 	ros::AsyncSpinner spinner(1);
 	spinner.start();
 
-	//Socket comm
-	int serv_sock, clnt_sock;//server socket
+	// comm
+	int serv_sock;//server socket
 	struct sockaddr_in serv_adr, clnt_adr;
 	socklen_t clnt_adr_sz;//client adress size
 	int str_len;//received m length
+	char Connected[BUF_SIZE];//connnect message
 
 	char message[] = "Hello, I'm Ubuntu, Server!";
 	unsigned char message_rec[8];
-
-	//socket creation
-	serv_sock = socket (PF_INET, SOCK_STREAM, 0); //create socket
+	unsigned char VAL[8];
+	// comm: create socket
+	serv_sock = socket(PF_INET, SOCK_DGRAM, 0);
 	if (serv_sock == -1) {
-		error_handling ("tcp socket creation error");
+		error_handling ("UDP socket creation error");
 	}
 	else {
-		printf("1. success to creating tcp socket\n");
+		ROS_INFO("1. success to creating UDP socket\n");
 	}
 
-	//memset
+	// comm: memset
 	memset(&serv_adr, 0, sizeof(serv_adr));
 	serv_adr.sin_family = AF_INET;
 	serv_adr.sin_addr.s_addr = htonl(INADDR_ANY);
 	serv_adr.sin_port = htons(portnum);
 
-	//binding -> assign ip address and port number
+	// comm: binding -> assign ip address and port number
 	if (bind(serv_sock, (struct sockaddr *)&serv_adr, sizeof(serv_adr)) == -1) {
 		error_handling("bind() error");
 	} else {
 		ROS_INFO("2. success binding\n");
 	}
 
-	if(listen(serv_sock, 5) == -1) {
-		error_handling("listen() error");
-	}
-	else {
-		printf("3. success to listening\n");
-	}
-
-	//Receive connectM from Client
+	// comm: Receive connectM from Client
 	clnt_adr_sz = sizeof(clnt_adr);//client address size
-	clnt_sock = accept(serv_sock, (struct sockaddr*)&clnt_adr, &clnt_adr_sz); //call 'accept' -> accept connection
-	if (clnt_sock == -1) {
-		error_handling("accept() error");
-	}
-	printf("4. waiting for message from client\n");
-	str_len = recv(clnt_sock, message_rec, 1023, 0);
-	//str_len = read(clnt_sock, message_rec, 1023);
-	message_rec[str_len] = 0;
-	printf("5. message from client: %s\n", message_rec);
+	str_len = recvfrom(serv_sock, Connected, BUF_SIZE, 0, (struct sockaddr *)&clnt_adr, &clnt_adr_sz);//receive M(Connected) from client
+	Connected[str_len] = 0;
 
-	printf("6. sending message to client\n");
-	send(clnt_sock, message, sizeof(message), 0); //End of the connection testing
+	ROS_INFO("3. message from client: %s\n", Connected);
+
+	sendto(serv_sock, message, sizeof(message), 0, (struct sockaddr *)&clnt_adr, clnt_adr_sz); //End of the connection testing
+	printf("4. send message to client\n");
 
 	// Create Transform listener object
 	tf::TransformListener listener;
@@ -131,177 +124,174 @@ int main (int argc, char **argv)
 	ros::Publisher pub_cartesian_command = nh.advertise<geometry_msgs::PoseStamped>(command_cartesian_position_topic, 1);
 	ros::Publisher pub_joint_command = nh.advertise<iiwa_msgs::JointPosition>(command_joint_position_topic, 1);
 
-	// After finishing initialization, move the robot backward.
-	if(ros::ok() && isRobotConnected)
+	ROS_INFO("Try Robot connection.");
+	while (ros::ok())
 	{
-		ROS_INFO("Robot moves backward.");
-		command_cartesian_position = current_cartesian_position;
-		command_cartesian_position.pose.position.x -= 0.15;
-		pub_cartesian_command.publish(command_cartesian_position);
+		if (isRobotConnected) {
+			ROS_INFO("Robot connected.");
+
+			command_cartesian_position = current_cartesian_position;
+			setRobotPose(0, 700.0, 0, 486.33, 0); //ori, x, y, z, r
+			pub_cartesian_command.publish(command_cartesian_position);
+			ROS_INFO("Robot moves backward.");
+			ros::Duration(1.0).sleep();
+
+			robotInit=true;
+
+			break;
+		}
+		else {
+			ROS_ERROR("Robot is not connected...");
+			ros::Duration(1.0).sleep();
+		}
 	}
+/*
+	// After finishing initialization, move the robot backward.
+	while(ros::ok() && isRobotConnected && use_cartesian_command)
+	{
+		command_cartesian_position = current_cartesian_position;
+		setRobotPose(0, 700.0, 0, 486.33, 0); //ori, x, y, z, r
+		pub_cartesian_command.publish(command_cartesian_position);
+		ROS_INFO("Robot moves backward.");
+		ros::Duration(1.0).sleep();
+
+		robotInit=true;
+		break;
+	}
+	*/
 
 	//start haptic loop
-	while (ros::ok() && isRobotConnected && use_cartesian_command)
+	while (ros::ok() && robotInit)
 	{
-		//waiting for message from UNITY. if there is no message, hold robot configuration and wait
-		//printf("waiting for message from UNITY!\n");
-		str_len = recv(clnt_sock, message_rec, 16, 0);
-		memcpy(&ori, &message_rec, sizeof(ori));
-		memcpy(&pos_x, &message_rec[4], sizeof(pos_x));
-		memcpy(&pos_y, &message_rec[8], sizeof(pos_y));
-		memcpy(&pos_z, &message_rec[12], sizeof(pos_z));
-		message_rec[str_len] = 0;
-
-		//control mode is decided by sign of ori
-		if (ori < 0)
+		if (isRobotConnected && use_cartesian_command)
 		{
-			compliant_control = true;
-			ori = ori*(-1);
-		}
-		else
+			//waiting for message from UNITY. if there is no message, hold robot configuration and wait
+			//printf("waiting for message from UNITY!\n");
+			str_len = recvfrom(serv_sock, message_rec, 20, 0, (struct sockaddr *)&clnt_adr, &clnt_adr_sz);
+			//str_len = recv(clnt_sock, message_rec, 20, 0);
+			memcpy(&ori,		&message_rec,			sizeof(ori));
+			memcpy(&pos_x,	&message_rec[4],	sizeof(pos_x));
+			memcpy(&pos_y,	&message_rec[8],	sizeof(pos_y));
+			memcpy(&pos_z,	&message_rec[12],	sizeof(pos_z));
+			memcpy(&rough,	&message_rec[16],	sizeof(rough));
+			//message_rec[str_len] = 0;
+
+			//control mode is decided by size of the ori
+			if (ori > 400) //dynamic object
+			{
+				compliant_control = true;
+				ori = ori - 600;
+			}
+
+			else //static object
+			{
+				compliant_control = false;
+			}
+
+			if(pos_x_old != pos_x || pos_y_old != pos_y || pos_z_old != pos_z)
+			{
+				setRobotPose(ori, pos_x, pos_y, pos_z, rough);
+				ROS_INFO("set pos x: %f, y: %f, z: %f", command_cartesian_position.pose.position.x, command_cartesian_position.pose.position.y, command_cartesian_position.pose.position.z);
+				ROS_INFO("set ori x: %f, y: %f, z: %f, w:%f", command_cartesian_position.pose.orientation.x, command_cartesian_position.pose.orientation.y, command_cartesian_position.pose.orientation.z, command_cartesian_position.pose.orientation.w);
+			}
+
+			pos_x_old = pos_x;
+			pos_y_old = pos_y;
+			pos_z_old = pos_z;
+
+			//command_cartesian_position = current_cartesian_position;
+			//setRobotPose(ori, pos_x, pos_y, pos_z, rough);
+			bool reachable = checkReachability(ori, pos_x, pos_y, pos_z);
+
+			if(!compliant_control)
+			{
+				if(reachable)
+				{
+					pub_cartesian_command.publish(command_cartesian_position);
+				}
+			}
+
+			else //compliant control
+			{
+				//ROS_INFO("compliant control");
+				// Setting Cartesian Impedance mode
+				config.request.mode.mode = iiwa_msgs::SmartServoMode::CARTESIAN_IMPEDANCE;
+				config.request.mode.relative_velocity = 0.05;
+				config.request.mode.cartesian_stiffness.stiffness.x = 1000;
+				config.request.mode.cartesian_stiffness.stiffness.y = 1000;
+				config.request.mode.cartesian_stiffness.stiffness.z = 200;
+				config.request.mode.cartesian_stiffness.stiffness.a = 280;
+				config.request.mode.cartesian_stiffness.stiffness.b = 280;
+				config.request.mode.cartesian_stiffness.stiffness.c = 280;
+
+				//valid range ([0.1, 1])
+				config.request.mode.cartesian_damping.damping.x = 0.7;
+				config.request.mode.cartesian_damping.damping.y = 0.7;
+				config.request.mode.cartesian_damping.damping.z = 0.7;
+				config.request.mode.cartesian_damping.damping.a = 0.7;
+				config.request.mode.cartesian_damping.damping.b = 0.7;
+				config.request.mode.cartesian_damping.damping.c = 0.7;
+
+				pub_cartesian_command.publish(command_cartesian_position);
+
+				client.call(config);
+			}}
+		}//end of the haptic loop
+
+
+		std::cerr<<"Stopping spinner..."<<std::endl;
+		spinner.stop();
+
+		std::cerr<<"Bye!"<<std::endl;
+
+		return 0;
+
+	};
+	/////////////////////////////end of the main//////////////////////////
+
+	void setRobotPose(int ori, float x, float y, float z, int r)
+	{
+		command_cartesian_position.pose.position.x = x;
+		command_cartesian_position.pose.position.y = y;
+		command_cartesian_position.pose.position.z = z;
+
+//		command_cartesian_position.pose.orientation.x = (22.5 * floor(r/10)*PI)/180; // relative angle!!! 0,1,2,3,4
+		command_cartesian_position.pose.orientation.x = 0.0; //0.0, 22.5, 45, 67.5, 90
+		command_cartesian_position.pose.orientation.y = 1.5708;
+		command_cartesian_position.pose.orientation.z = (ori*PI)/180; //ori in radian
+
+		command_cartesian_position.pose.orientation.w = r % 10; //TODO: relative velocity!!!
+	}
+
+	bool checkReachability(int ori, float x, float y, float z)
+	{
+		bool reach = false;
+		if(x>-800 && x<800 && y>-800 && y<800 && z>0 && z<1200 )
 		{
-			compliant_control = false;
+			reach = true;
 		}
 
-		//command_cartesian_position = current_cartesian_position;
-		setRobotPose(ori, pos_x, pos_y, pos_z);
-
-		if(!compliant_control)
-		{
-			//ROS_INFO("cartesian control");
-			pub_cartesian_command.publish(command_cartesian_position);
-		}
-
-		else //compliant control
-		{
-			//ROS_INFO("compliant control");
-			// Setting Cartesian Impedance mode
-			pub_cartesian_command.publish(command_cartesian_position);
-			config.request.mode.mode = iiwa_msgs::SmartServoMode::CARTESIAN_IMPEDANCE;
-			config.request.mode.relative_velocity = 0.05;
-			config.request.mode.cartesian_stiffness.stiffness.x = 1000;
-			config.request.mode.cartesian_stiffness.stiffness.y = 1000;
-			config.request.mode.cartesian_stiffness.stiffness.z = 200;
-			config.request.mode.cartesian_stiffness.stiffness.a = 280;
-			config.request.mode.cartesian_stiffness.stiffness.b = 280;
-			config.request.mode.cartesian_stiffness.stiffness.c = 280;
-
-			//valid range ([0.1, 1])
-			config.request.mode.cartesian_damping.damping.x = 0.7;
-			config.request.mode.cartesian_damping.damping.y = 0.7;
-			config.request.mode.cartesian_damping.damping.z = 0.7;
-			config.request.mode.cartesian_damping.damping.a = 0.7;
-			config.request.mode.cartesian_damping.damping.b = 0.7;
-			config.request.mode.cartesian_damping.damping.c = 0.7;
-
-			client.call(config);
-		}
-	}//end of the haptic loop
-
-
-	std::cerr<<"Stopping spinner..."<<std::endl;
-	spinner.stop();
-
-	std::cerr<<"Bye!"<<std::endl;
-
-	return 0;
-
-};
-/////////////////////////////end of the main//////////////////////////
-
-void setRobotPose(int ori, float x, float y, float z)
-{
-	if(ori==225) //ori_1
-	{
-		//ROS_INFO("ori_1");
-		command_cartesian_position.pose.orientation.x = -0.2706;
-		command_cartesian_position.pose.orientation.y = 0.6533;
-		command_cartesian_position.pose.orientation.z = 0.2706;
-		command_cartesian_position.pose.orientation.w = 0.6533;
+		return reach;
 	}
 
-	else if(ori==210) //ori_2
+	void jointPositionCallback(const iiwa_msgs::JointPosition& jp)
 	{
-		//ROS_INFO("ori_2");
-		command_cartesian_position.pose.orientation.x = -0.1830;
-		command_cartesian_position.pose.orientation.y = 0.6830;
-		command_cartesian_position.pose.orientation.z = 0.1830;
-		command_cartesian_position.pose.orientation.w = 0.6830;
+		if (!isRobotConnected)
+		isRobotConnected = !isRobotConnected;
+		current_joint_position = jp;
 	}
 
-	else if(ori==195) //ori_3
+	void cartesianPositionCallback(const geometry_msgs::PoseStamped& ps)
 	{
-		//ROS_INFO("ori_3");
-		command_cartesian_position.pose.orientation.x = -0.0923;
-		command_cartesian_position.pose.orientation.y = 0.7011;
-		command_cartesian_position.pose.orientation.z = 0.0923;
-		command_cartesian_position.pose.orientation.w = 0.7011;
+		if (!isRobotConnected)
+		isRobotConnected = !isRobotConnected;
+		current_cartesian_position = ps;
 	}
 
-	else if(ori==180) //ori_4
+	//Socket comm
+	void error_handling(const char * message)
 	{
-		//ROS_INFO("ori_4");
-		command_cartesian_position.pose.orientation.x = 0;
-		command_cartesian_position.pose.orientation.y = 0.707;
-		command_cartesian_position.pose.orientation.z = 0;
-		command_cartesian_position.pose.orientation.w = 0.707;
+		fputs(message, stderr);
+		fputc('\n', stderr);
+		exit(1);
 	}
-
-	else if(ori==165) //ori_5
-	{
-		//ROS_INFO("ori_5");
-		command_cartesian_position.pose.orientation.x = 0.0923;
-		command_cartesian_position.pose.orientation.y = 0.7011;
-		command_cartesian_position.pose.orientation.z = -0.0923;
-		command_cartesian_position.pose.orientation.w = 0.7011;
-	}
-
-	else if(ori==150) //ori_6
-	{
-		//ROS_INFO("ori_6");
-		command_cartesian_position.pose.orientation.x = 0.1830;
-		command_cartesian_position.pose.orientation.y = 0.6830;
-		command_cartesian_position.pose.orientation.z = -0.1830;
-		command_cartesian_position.pose.orientation.w = 0.6830;
-	}
-
-	else if(ori==135) //ori_7
-	{
-		//ROS_INFO("ori_7");
-		command_cartesian_position.pose.orientation.x = 0.2706;
-		command_cartesian_position.pose.orientation.y = 0.6533;
-		command_cartesian_position.pose.orientation.z = -0.2706;
-		command_cartesian_position.pose.orientation.w = 0.6533;
-
-	}
-
-	command_cartesian_position.pose.position.x = x;
-	command_cartesian_position.pose.position.y = y;
-	command_cartesian_position.pose.position.z = z;
-}
-
-void checkReachability()
-{
-}
-
-void jointPositionCallback(const iiwa_msgs::JointPosition& jp)
-{
-	if (!isRobotConnected)
-	isRobotConnected = !isRobotConnected;
-	current_joint_position = jp;
-}
-
-void cartesianPositionCallback(const geometry_msgs::PoseStamped& ps)
-{
-	if (!isRobotConnected)
-	isRobotConnected = !isRobotConnected;
-	current_cartesian_position = ps;
-}
-
-//Socket comm
-void error_handling(const char * message)
-{
-	fputs(message, stderr);
-	fputc('\n', stderr);
-	exit(1);
-}
