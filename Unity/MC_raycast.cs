@@ -106,11 +106,10 @@ public class MC_raycast : MonoBehaviour {
 				touchable = true;
 
 			}
-			/*
+
 			else if(target_wall.gameObject.tag == "dynamic_wall")
 			{
 				string objname = target_wall.gameObject.name;
-				Debug.Log("wall:" + objname);
 				roughness = System.Convert.ToSingle(objname);
 
 				float wall_ori = target_wall.transform.eulerAngles.y;
@@ -128,10 +127,28 @@ public class MC_raycast : MonoBehaviour {
 				float p_col_z = target_wall.transform.position.z - d*cos*Mathf.Cos(wall_ori*Mathf.Deg2Rad);
 				proxy_wall.transform.position = new Vector3(p_col_x, r_palm.transform.position.y, p_col_z);
 
-				ori = aa + 500;
+				//predicted colision point -> sphere_test orientation
+				Vector3 direction_hit2 = proxy_wall.transform.position - r_palm.transform.position;
+				Physics.Raycast(r_palm.transform.position, direction_hit2, out hit2, 20.0f);
+				Debug.DrawRay(proxy_wall.transform.position, hit2.normal, Color.blue);
+
+				Vector3 from = new Vector3(0, 0, -1); //proxy_base
+				Vector3 to = hit2.normal; //normal
+
+				a = Vector3.Angle(from, to);
+
+				Vector3 p = Vector3.Cross(from, to);
+				Vector3 q = new Vector3(0, 1, 0);
+
+				if(Vector3.Dot(p, q)<0)
+				{
+					a  = a*(-1) + 360;
+				}
+
+				proxy_wall.transform.eulerAngles = new Vector3(-90, a+90+600, 180); //add 600 for distinguishing the dynamic object
+
 				touchable = true;
-				//WholeSystem.transform.rotation = Quaternion.Lerp(from, to, Time.time * speed);
-			}*/
+			}
 
 			else if(target_wall.gameObject.tag == "static_sphere")
 			{
