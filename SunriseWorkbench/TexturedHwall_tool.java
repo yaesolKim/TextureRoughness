@@ -55,6 +55,7 @@ public class TexturedHwall_tool extends RoboticsAPIApplication {
 	private SmartServo 		motion;
 	private Lock 			configureSmartServoLock = new ReentrantLock();
 	private double 			initial_velocity = 0.05;
+	private double			force_threshold = -1.5; //-2: cannot contact collision
 	private IServoRuntime 	theServoRuntime;
 	private boolean 		initSuccessful = false;
 	private boolean 		debug = false;
@@ -320,54 +321,51 @@ public class TexturedHwall_tool extends RoboticsAPIApplication {
 		  getLogger().info("no tool attached");
 		}
 		
-		ThreadUtil.milliSleep(5000); 
+		ThreadUtil.milliSleep(2000); 
 		
 		getLogger().info("default frame: " + tool.getDefaultMotionFrame().getName());
-		ThreadUtil.milliSleep(5000);
-		
-		getLogger().info("hey!");
 		tool.getDefaultMotionFrame().moveAsync(motion);//2
 		
-		getLogger().info("a");
-		ThreadUtil.milliSleep(5000);
-		
 		theServoRuntime = motion.getRuntime();//3		
-		getLogger().info("b");
+		
+		ThreadUtil.milliSleep(5000); 
+		
 		Frame goalFrame = theServoRuntime.getCurrentCartesianPosition(tool.getDefaultMotionFrame());
 		
-		getLogger().info("c");
-		ThreadUtil.milliSleep(5000);
-		getLogger().info("current tool position x:" + goalFrame.getX()+ " y:" + goalFrame.getY()+ " z:" + goalFrame.getZ());
-		getLogger().info("current tool orientation a:" + goalFrame.getAlphaRad()+ " b:" + goalFrame.getBetaRad() + " r:" + goalFrame.getGammaRad());
+		goalFrame.setX(812.0);
+		goalFrame.setY(0.0);
+        goalFrame.setZ(487.0);
+        
+        goalFrame.setAlphaRad(0);
+        goalFrame.setBetaRad(1.5708);
+        goalFrame.setGammaRad(0);
+		
+		//812, 0, 487,,, 0, 1.5708,0
+		//getLogger().info("current tool position x:" + goalFrame.getX()+ " y:" + goalFrame.getY()+ " z:" + goalFrame.getZ());
+		//getLogger().info("current tool orientation a:" + goalFrame.getAlphaRad()+ " b:" + goalFrame.getBetaRad() + " r:" + goalFrame.getGammaRad());
 
 		publisher.setPublishJointStates(configuration.getPublishJointStates());
 		ThreadUtil.milliSleep(5000);
+
+		theServoRuntime.setDestination(goalFrame);//4
+		getLogger().info("Set destination");
+		
 		// The run loop
 		getLogger().info("Starting the ROS Command loop...");		
 		try {
-			goalFrame.setX(812.0);
-			goalFrame.setY(0.0);
-	        goalFrame.setZ(487.0);
-	        goalFrame.setAlphaRad(0);
-	        goalFrame.setBetaRad(1.5708);
-	        goalFrame.setGammaRad(0);
-			theServoRuntime.setDestination(goalFrame);//4
-			
-			ThreadUtil.milliSleep(5000);
 			
 			getLogger().info("start try-catch block"); 
 			while (true) {
 				if (iiwaConfig.getTimeProvider() instanceof org.ros.time.NtpTimeProvider) {
 					((NtpTimeProvider) iiwaConfig.getTimeProvider()).updateTime();		
 				}
-				//publisher.publishCurrentState(robot, motion); //is this essential?
+				publisher.publishCurrentState(robot, motion); //is this essential?
 		       
 		       if (subscriber.currentCommandType != null) {
 		    	   configureSmartServoLock.lock(); // the service could stop the motion and restart it
 
 		    	   switch (subscriber.currentCommandType) {
 		    	   case CARTESIAN_POSE: {
-		    		   getLogger().info("Subscribe");
 		    		   PoseStamped commandPosition = subscriber.getCartesianPose(); // TODO: check that frame_id is consistent
 		           
 			           goalFrame.setX(commandPosition.getPose().getPosition().getX());
@@ -384,7 +382,7 @@ public class TexturedHwall_tool extends RoboticsAPIApplication {
 			           Vector force = data.getForce();
 			           double forceInZ = force.getZ();
 			           
-			           if (robot.isReadyToMove()&& (forceInZ > -2)) { //non-contact state
+			           if (robot.isReadyToMove()&& (forceInZ > force_threshold)) { //non-contact state
 			        	   theServoRuntime.setDestination(goalFrame);//4 
 			           }
 			           else { //contact state
@@ -414,8 +412,8 @@ public class TexturedHwall_tool extends RoboticsAPIApplication {
 		     
 		   } catch (Exception ex) {
 		     getLogger().info("ROS loop aborted. " + ex.toString());
-		     getLogger().info("pos: " + goalFrame.getX() + ", "+ goalFrame.getY() + ", "+ goalFrame.getZ());
-		     getLogger().info("ori: " + goalFrame.getAlphaRad() + ", "+ goalFrame.getBetaRad() + ", "+ goalFrame.getGammaRad());
+		     getLogger().info("goal pos: " + goalFrame.getX() + ", "+ goalFrame.getY() + ", "+ goalFrame.getZ());
+		     getLogger().info("goal ori: " + goalFrame.getAlphaRad() + ", "+ goalFrame.getBetaRad() + ", "+ goalFrame.getGammaRad());
 		   }
 		
 		   finally {
