@@ -342,11 +342,11 @@ public class FrameCheck extends RoboticsAPIApplication {
 		
 		goalFrame.setX(812.0);
 		goalFrame.setY(0.0);
-        goalFrame.setZ(487.0);
+        	goalFrame.setZ(487.0);
         
-        goalFrame.setAlphaRad(1.5708);
-        goalFrame.setBetaRad(1.5708);
-        goalFrame.setGammaRad(1.5708);
+        	goalFrame.setAlphaRad(1.5708);
+        	goalFrame.setBetaRad(1.5708);
+        	goalFrame.setGammaRad(1.5708);
         
 		publisher.setPublishJointStates(configuration.getPublishJointStates());
 		theServoRuntime.setDestination(goalFrame);//4
@@ -354,66 +354,66 @@ public class FrameCheck extends RoboticsAPIApplication {
 		ThreadUtil.milliSleep(5000);
 		
 		goalFrame.setAlphaRad(1.5708);
-        goalFrame.setBetaRad(1.178697);
-        //goalFrame.setGammaRad(1.5708);
-        theServoRuntime.setDestination(goalFrame);//4
+        	goalFrame.setBetaRad(1.178697);
+        	//goalFrame.setGammaRad(1.5708);
+        	theServoRuntime.setDestination(goalFrame);//4
 		getLogger().info("Set destination 2");
 		ThreadUtil.milliSleep(5000);
         
 		
 		goalFrame.setAlphaRad(1.5708);
-        goalFrame.setBetaRad(0.785398);
-        //goalFrame.setGammaRad(1.5708);
-        theServoRuntime.setDestination(goalFrame);//4
+		goalFrame.setBetaRad(0.785398);
+		//goalFrame.setGammaRad(1.5708);
+		theServoRuntime.setDestination(goalFrame);//4
 		getLogger().info("Set destination 3");
 		ThreadUtil.milliSleep(5000);
 
 		goalFrame.setAlphaRad(1.5708);
-        goalFrame.setBetaRad(0.3926881);
-        //goalFrame.setGammaRad(1.5708);
-        theServoRuntime.setDestination(goalFrame);//5
+		goalFrame.setBetaRad(0.3926881);
+		//goalFrame.setGammaRad(1.5708);
+		theServoRuntime.setDestination(goalFrame);//5
 		getLogger().info("Set destination 4");
 		ThreadUtil.milliSleep(5000);
 		
-        goalFrame.setAlphaRad(1.5708);
-        goalFrame.setBetaRad(0);
-        //goalFrame.setGammaRad(1.5708);
-        theServoRuntime.setDestination(goalFrame);//4
+		goalFrame.setAlphaRad(1.5708);
+		goalFrame.setBetaRad(0);
+		//goalFrame.setGammaRad(1.5708);
+		theServoRuntime.setDestination(goalFrame);//4
 		getLogger().info("Set destination 5");
 		ThreadUtil.milliSleep(5000);
 		
 		goalFrame.setAlphaRad(1.5708);
-        goalFrame.setBetaRad(1.5708);
-        theServoRuntime.setDestination(goalFrame);//4
+		goalFrame.setBetaRad(1.5708);
+		theServoRuntime.setDestination(goalFrame);//4
 		getLogger().info("Set destination 1 again");
 		ThreadUtil.milliSleep(5000);
 		
 		goalFrame.setAlphaRad(0.785398);
-        goalFrame.setBetaRad(1.5708);
-        theServoRuntime.setDestination(goalFrame);//4
+        	goalFrame.setBetaRad(1.5708);
+        	theServoRuntime.setDestination(goalFrame);//4
 		getLogger().info("Set destination 2");
 		ThreadUtil.milliSleep(5000);
 				
 		goalFrame.setAlphaRad(0.785398);
-        goalFrame.setBetaRad(1.178697);
-        theServoRuntime.setDestination(goalFrame);//4
+		goalFrame.setBetaRad(1.178697);
+		theServoRuntime.setDestination(goalFrame);//4
 		getLogger().info("Set destination 2");
 		ThreadUtil.milliSleep(5000);
 		
 		goalFrame.setAlphaRad(0.785398);
-        goalFrame.setBetaRad(0.785398);
-        theServoRuntime.setDestination(goalFrame);//4
+		goalFrame.setBetaRad(0.785398);
+		theServoRuntime.setDestination(goalFrame);//4
 		getLogger().info("Set destination 2");
 		ThreadUtil.milliSleep(5000);
 				
 		goalFrame.setAlphaRad(0.785398);
-        goalFrame.setBetaRad(0.3926881);
-        theServoRuntime.setDestination(goalFrame);//4
+		goalFrame.setBetaRad(0.3926881);
+		theServoRuntime.setDestination(goalFrame);//4
 		getLogger().info("Set destination 2");
 		ThreadUtil.milliSleep(5000);
 		goalFrame.setAlphaRad(0.785398);
-        goalFrame.setBetaRad(0);
-        theServoRuntime.setDestination(goalFrame);//4
+		goalFrame.setBetaRad(0);
+		theServoRuntime.setDestination(goalFrame);//4
 		getLogger().info("Set destination 2");
 		ThreadUtil.milliSleep(5000);
 		
