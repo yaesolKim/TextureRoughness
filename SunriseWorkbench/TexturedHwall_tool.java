@@ -1,6 +1,7 @@
 package hapticRendering;
 
 //ROS imports
+import static com.kuka.roboticsAPI.motionModel.BasicMotions.linRel;
 import geometry_msgs.PoseStamped;
 import iiwa_msgs.CartesianQuantity;
 import iiwa_msgs.ConfigureSmartServoRequest;
@@ -33,10 +34,14 @@ import com.kuka.roboticsAPI.geometricModel.ObjectFrame;
 import com.kuka.roboticsAPI.geometricModel.Tool;
 import com.kuka.roboticsAPI.geometricModel.math.Transformation;
 import com.kuka.roboticsAPI.geometricModel.math.Vector;
-import com.kuka.roboticsAPI.motionModel.IServoRuntime; //Iservo!!!
+import com.kuka.roboticsAPI.geometricModel.math.XyzAbcTransformation;
+//import com.kuka.roboticsAPI.motionModel.IServoRuntime; //Iservo!!!
+import com.kuka.roboticsAPI.motionModel.ISmartServoLINRuntime;
+import com.kuka.roboticsAPI.motionModel.ISmartServoRuntime;
 import com.kuka.roboticsAPI.motionModel.PTP;
 import com.kuka.roboticsAPI.motionModel.ServoMotion;
 import com.kuka.roboticsAPI.motionModel.SmartServo;
+import com.kuka.roboticsAPI.motionModel.SplineOrientationType;
 import com.kuka.roboticsAPI.motionModel.controlModeModel.CartesianImpedanceControlMode;
 import com.kuka.roboticsAPI.motionModel.controlModeModel.IMotionControlMode;
 import com.kuka.roboticsAPI.motionModel.controlModeModel.JointImpedanceControlMode;
@@ -44,29 +49,50 @@ import com.kuka.roboticsAPI.sensorModel.ForceSensorData;
 import com.kuka.roboticsAPI.uiModel.userKeys.IUserKey;
 import com.kuka.roboticsAPI.uiModel.userKeys.IUserKeyBar;
 import com.kuka.roboticsAPI.uiModel.userKeys.IUserKeyListener;
+import com.kuka.roboticsAPI.motionModel.SmartServoLIN;
+import com.kuka.roboticsAPI.geometricModel.AbstractFrame;
+
 
 import com.kuka.roboticsAPI.geometricModel.Frame; //frame
+import com.kuka.common.StatisticTimer;
 import com.kuka.common.ThreadUtil; //sleep
+import com.kuka.common.StatisticTimer.OneTimeStep;
 
 public class TexturedHwall_tool extends RoboticsAPIApplication {
 	private Controller		cabinet;
 	private LBR 			robot;
-	private Tool 			tool;	
+	
+	private Tool 			tool, tool_lin;
+
 	private SmartServo 		motion;
+	private SmartServoLIN 	motion_lin;
+	
+	private ISmartServoRuntime	SSR;
+    private ISmartServoLINRuntime SSLR;
+
 	private Lock 			configureSmartServoLock = new ReentrantLock();
 	private double 			initial_velocity = 0.05;
-	private double			force_threshold = -1.5; //-2: cannot contact collision
-	private IServoRuntime 	theServoRuntime;
+	private double			force_threshold = -4.0; //-2: cannot contact collision
 	private boolean 		initSuccessful = false;
 	private boolean 		debug = false;
+	private boolean 		contact = false;
+	private ForceSensorData force_data;
+	private Vector 			force_vec;
+	private double 			forceInZ;
+	
+	private Frame 			aFrame;
+	private StatisticTimer	timing;
+    private final double[]	translationOfTool = { 0, 0, 140 };
+    private final double 	amplitude = 10; //70
+    private final double 	freqency = 0.6;
+    private static final int milliSleepToEmulateComputationalEffort = 30;
 	
 	private iiwaMessageGenen helper; //< Helper class to generate iiwa_msgs from current robot state.
 	private iiwaPub publisher; //< IIWARos Publisher.
 	private iiwaSub subscriber; //< IIWARos Subscriber.
 	private iiwaConfig configuration; //< Configuration via parameters and services.
 	
-	// ROS Configuration and Node execution objects. Two different configurations are needed
-	// for the Publisher and the Subscriber.
+	// ROS Configuration and Node execution objects. Two different configurations are needed for the Publisher and the Subscriber.
 	private NodeConfiguration nodeConfPublisher;
 	private NodeConfiguration nodeConfSubscriber;
 	private NodeConfiguration nodeConfConfiguration;
@@ -156,7 +182,6 @@ public class TexturedHwall_tool extends RoboticsAPIApplication {
 		mot.setMinimumTrajectoryExecutionTime(8e-3);
 		mot.setJointVelocityRel(configuration.getDefaultRelativeJointSpeed());
 		
-		//mot.setMinimumTrajectoryExecutionTime(100e-3);
 		mot.setTimeoutAfterGoalReach(300);
 		
 		configureSmartServoMotion(ssm, mot);
@@ -196,53 +221,55 @@ public class TexturedHwall_tool extends RoboticsAPIApplication {
 		configuration = new iiwaConfig();
 		publisher = new iiwaPub(robot, iiwaConfig.getRobotName());
 		subscriber = new iiwaSub(robot, iiwaConfig.getRobotName());
-		
+				
 		tool = getApplicationData().createFromTemplate("tool");
-		tool.attachTo(robot.getFlange());
+		tool.attachTo(robot.getFlange()); // Attach tool to the robot
+		
+		tool_lin = getApplicationData().createFromTemplate("tool_lin");
+		XyzAbcTransformation trans = XyzAbcTransformation.ofTranslation(translationOfTool[0], translationOfTool[1], translationOfTool[2]);
+        ObjectFrame aTransformation = tool_lin.addChildFrame("toolFrame" + "(TCP)", trans);
+        tool_lin.setDefaultMotionFrame(aTransformation);
+		tool_lin.attachTo(robot.getFlange()); // Attach tool to the robot
 		
 		getLogger().info("move tool with initial vel: " + initial_velocity );  
-		tool.move(new PTP(new JointPosition(0, 0.523599, 0, -1.5708, 0, -0.523599, 0 )).setJointVelocityRel(initial_velocity));
+		tool.move(new PTP(new JointPosition(0, 0.523599, 0, -1.5708, 0, -0.523599, 1.5708)).setJointVelocityRel(initial_velocity));
 		
-		// SmartServo configuration service callback
+		///////////////////////////// SmartServo configuration service callback
 		subscriber.setConfigureSmartServoCallback(new ServiceResponseBuilder<iiwa_msgs.ConfigureSmartServoRequest, iiwa_msgs.ConfigureSmartServoResponse>() {
-			   @Override
-		  public void build(ConfigureSmartServoRequest req, ConfigureSmartServoResponse resp) throws ServiceException {
-		    // we can change the parameters if it is the same type of control strategy
-		    // otherwise we have to stop the motion, replace it and start it again
-		    try {
-		    	if (motion.getMode() != null && isSameControlMode(motion.getMode(), req.getMode())) {
-		    		motion.getRuntime().changeControlModeSettings(buildMotionControlMode(req.getMode()));	
-		    	}
-		    	else {
-		    		configureSmartServoLock.lock();
-		    		SmartServo oldmotion = motion;
-		    		ServoMotion.validateForImpedanceMode(robot);
-		    		motion = configureSmartServoMotion(req.getMode()); //1
-		    		tool.getDefaultMotionFrame().moveAsync(motion); //2
-		    		theServoRuntime = motion.getRuntime();//3
-		        
-		    		oldmotion.getRuntime().stopMotion();		
-		    		configureSmartServoLock.unlock();	
-		    	}		    	
-		    }
-		    catch (Exception e) {
-		    	resp.setSuccess(false);
+			@Override
+			public void build(ConfigureSmartServoRequest req, ConfigureSmartServoResponse resp) throws ServiceException {
+				try {
+					if (motion.getMode() != null && isSameControlMode(motion.getMode(), req.getMode())) { //change the parameters if it is the same type of control strategy
+						motion.getRuntime().changeControlModeSettings(buildMotionControlMode(req.getMode()));	
+					}
+					else { // otherwise, stop the motion, replace it and start it again
+			    		configureSmartServoLock.lock();
+			    		SmartServo oldmotion = motion;
+			    		ServoMotion.validateForImpedanceMode(robot);
+			    		motion = configureSmartServoMotion(req.getMode());
+			    		tool.getDefaultMotionFrame().moveAsync(motion);
+			    		SSR = motion.getRuntime();		        
+			    		oldmotion.getRuntime().stopMotion();		
+			    		configureSmartServoLock.unlock();	
+					}	
+				}
+				catch (Exception e) {
+					resp.setSuccess(false);
 		    	
-		    	if (e.getMessage() != null) {
-		    		StringWriter sw = new StringWriter();
-		    		PrintWriter pw = new PrintWriter(sw);
-		    		e.printStackTrace(pw);
-		    		resp.setError(e.getClass().getName() + ": " + e.getMessage() + ", " + sw.toString());
-		    	} else {
-		    		resp.setError("UNKNOWN ERROR");
-		    	}		    	
-		    	return;
-		    }
-		    
-		    resp.setSuccess(true);
-		    
-		}
-		}); // End of SmartServo configuration service callback
+					if (e.getMessage() != null) {
+						StringWriter sw = new StringWriter();
+			    		PrintWriter pw = new PrintWriter(sw);
+			    		e.printStackTrace(pw);
+			    		resp.setError(e.getClass().getName() + ": " + e.getMessage() + ", " + sw.toString());
+			    	}
+					else {
+			    		resp.setError("UNKNOWN ERROR");
+			    	}
+					return;
+				}
+				resp.setSuccess(true);	
+			}	
+		}); ///////////////////////// End of SmartServo configuration service callback
 		
 		try {
 			// Set the configuration parameters of the ROS nodes to create.
@@ -287,8 +314,7 @@ public class TexturedHwall_tool extends RoboticsAPIApplication {
 	}
 	
 	public void run() {
-		getLogger().info("-----RUN-----");
-		
+		getLogger().info("-----RUN-----");		
 		if (!initSuccessful) {
 			throw new RuntimeException("Could not init the RoboticApplication successfully");
 		}		
@@ -298,15 +324,17 @@ public class TexturedHwall_tool extends RoboticsAPIApplication {
 			getLogger().info("Waiting for ROS Master to connect... ");
 			configuration.waitForInitialization();
 			getLogger().info("ROS Master is connected!");
-		} catch (InterruptedException e1) {
+		}
+		catch (InterruptedException e1) {
 			e1.printStackTrace();
-			return;
+			return; 
 		}
 		
-		motion = new SmartServo(robot.getCurrentJointPosition()); //1
+		// Create a new smart servo motion
+		motion = new SmartServo(robot.getCurrentJointPosition()); //1-1
 		motion.setMinimumTrajectoryExecutionTime(8e-3);
 		motion.setJointVelocityRel(configuration.getDefaultRelativeJointSpeed());
-		motion.setTimeoutAfterGoalReach(300);
+		motion.setTimeoutAfterGoalReach(300);        
 		
 		// configurable toolbars to publish events on topics
 		configuration.setupToolbars(getApplicationUI(), publisher, generalKeys, generalKeyLists, generalKeyBars);
@@ -321,53 +349,46 @@ public class TexturedHwall_tool extends RoboticsAPIApplication {
 		  getLogger().info("no tool attached");
 		}
 		
-		ThreadUtil.milliSleep(2000); 
+		ThreadUtil.milliSleep(3000); 
 		
 		getLogger().info("default frame: " + tool.getDefaultMotionFrame().getName());
-		tool.getDefaultMotionFrame().moveAsync(motion);//2
+		tool.getDefaultMotionFrame().moveAsync(motion); //1-2		
+		SSR = motion.getRuntime(); //1-3
 		
-		theServoRuntime = motion.getRuntime();//3		
-		
-		ThreadUtil.milliSleep(5000); 
-		
-		Frame goalFrame = theServoRuntime.getCurrentCartesianPosition(tool.getDefaultMotionFrame());
+		Frame goalFrame = SSR.getCurrentCartesianPosition(tool.getDefaultMotionFrame());
 		
 		goalFrame.setX(812.0);
 		goalFrame.setY(0.0);
         goalFrame.setZ(487.0);
         
-        goalFrame.setAlphaRad(0);
-        goalFrame.setBetaRad(1.5708);
-        goalFrame.setGammaRad(0);
-		
-		//812, 0, 487,,, 0, 1.5708,0
-		//getLogger().info("current tool position x:" + goalFrame.getX()+ " y:" + goalFrame.getY()+ " z:" + goalFrame.getZ());
-		//getLogger().info("current tool orientation a:" + goalFrame.getAlphaRad()+ " b:" + goalFrame.getBetaRad() + " r:" + goalFrame.getGammaRad());
-
+        goalFrame.setAlphaRad(1.5708);
+        goalFrame.setBetaRad(0);
+        goalFrame.setGammaRad(1.5708);
+	
 		publisher.setPublishJointStates(configuration.getPublishJointStates());
-		ThreadUtil.milliSleep(5000);
-
-		theServoRuntime.setDestination(goalFrame);//4
-		getLogger().info("Set destination");
 		
+		SSR.setDestination(goalFrame); //1-4
+		getLogger().info("Set destination");
+
+		ThreadUtil.milliSleep(2000);
+				
 		// The run loop
 		getLogger().info("Starting the ROS Command loop...");		
 		try {
-			
-			getLogger().info("start try-catch block"); 
+			getLogger().info("start try-catch block");
 			while (true) {
 				if (iiwaConfig.getTimeProvider() instanceof org.ros.time.NtpTimeProvider) {
 					((NtpTimeProvider) iiwaConfig.getTimeProvider()).updateTime();		
 				}
-				publisher.publishCurrentState(robot, motion); //is this essential?
-		       
+				publisher.publishCurrentState(robot, motion); //to confirm the connection in Ubuntu side
+				
 		       if (subscriber.currentCommandType != null) {
 		    	   configureSmartServoLock.lock(); // the service could stop the motion and restart it
 
 		    	   switch (subscriber.currentCommandType) {
-		    	   case CARTESIAN_POSE: {
-		    		   PoseStamped commandPosition = subscriber.getCartesianPose(); // TODO: check that frame_id is consistent
-		           
+		    	   case CARTESIAN_POSE: { 
+		    		   PoseStamped commandPosition = subscriber.getCartesianPose();
+		    		   
 			           goalFrame.setX(commandPosition.getPose().getPosition().getX());
 			           goalFrame.setY(commandPosition.getPose().getPosition().getY());
 			           goalFrame.setZ(commandPosition.getPose().getPosition().getZ());
@@ -376,17 +397,91 @@ public class TexturedHwall_tool extends RoboticsAPIApplication {
 			           goalFrame.setBetaRad(commandPosition.getPose().getOrientation().getY());
 			           goalFrame.setGammaRad(commandPosition.getPose().getOrientation().getZ());
 			           
-		    		   //getLogger().info("ori:" +commandPosition.getPose().getOrientation().getX() + ", " + commandPosition.getPose().getOrientation().getY() + ", " + commandPosition.getPose().getOrientation().getZ() );
-			           // collision detection by getting external force
-			           ForceSensorData data = robot.getExternalForceTorque(robot.getFlange());
-			           Vector force = data.getForce();
-			           double forceInZ = force.getZ();
+			           force_data = robot.getExternalForceTorque(robot.getFlange());
+			           force_vec = force_data.getForce();
+			           forceInZ = force_vec.getZ();
 			           
-			           if (robot.isReadyToMove()&& (forceInZ > force_threshold)) { //non-contact state
-			        	   theServoRuntime.setDestination(goalFrame);//4 
+			           //non-contact state : robot base coordinate
+			           if (robot.isReadyToMove()&& (forceInZ > force_threshold)) {			        	   
+			        	   if(contact) //contact == true
+			        	   {
+			        		   motion = new SmartServo(robot.getCurrentJointPosition()); //1-1
+			        		   motion.setMinimumTrajectoryExecutionTime(8e-3);
+			        		   motion.setJointVelocityRel(configuration.getDefaultRelativeJointSpeed());
+			        		   motion.setTimeoutAfterGoalReach(300);
+			        		   
+			        		   getLogger().info("Starting the SmartServo in position control mode");			        		   
+			        		   tool.getDefaultMotionFrame().moveAsync(motion);//1-2
+			        		   
+			        		   getLogger().info("Stop the SmartServoLIN motion");
+			        		   SSLR.stopMotion(); //2-5			        		   
+			        		   
+			        		   getLogger().info("Get the runtime of the SmartServo motion");
+			        		   SSR = motion.getRuntime();//1-3			        		   
+			        		  
+				        	   //ThreadUtil.milliSleep(1000);
+
+			        		   contact = false;
+			        	   }			        	   			   
+			        	   SSR.setDestination(goalFrame);//1-4 
 			           }
-			           else { //contact state
-			        	   ;
+
+			           //contact state : tool coordinate
+			           else {
+			        	   if(!contact) //contact == false
+			        	   {
+			        		   // Create a new smart servo linear motion
+			        		   motion_lin = new SmartServoLIN(robot.getCurrentCartesianPosition(robot.getFlange())); //2-1
+			        		   motion_lin.setMinimumTrajectoryExecutionTime(20e-3);
+			        			
+			        		   getLogger().info("Starting the SmartServoLIN in position control mode");
+				               robot.getFlange().moveAsync(motion_lin);//2-2
+				               
+				               getLogger().info("Stop the SmartServo motion");
+			        		   motion.getRuntime().stopMotion(); //1-5
+				               
+			        		   getLogger().info("Get the runtime of the SmartServoLIN motion");
+			        		   SSLR = motion_lin.getRuntime(); //2-3
+				              
+				               timing = new StatisticTimer();
+				               contact = true;
+				        	   ThreadUtil.milliSleep(1000);   
+			        	   }
+			        	   
+			        	   aFrame = SSLR.getCurrentCartesianDestination(robot.getFlange());
+			        	   double omega = freqency * 2 * Math.PI * 1e-9;
+			               long startTimeStamp = System.nanoTime();
+			               
+			               while (true)
+			               {
+			                   final OneTimeStep aStep = timing.newTimeStep(); //starting an individual measurement
+
+			                   ThreadUtil.milliSleep(milliSleepToEmulateComputationalEffort);
+
+			                   // Update the smart servo LIN runtime
+			                   SSLR.updateWithRealtimeSystem();
+
+			                   double curTime = System.nanoTime() - startTimeStamp;
+			                   double sinArgument = omega * curTime;
+
+			                   // Compute the sine function
+			                   Frame destFrame = new Frame(aFrame);
+			                   destFrame.setX(amplitude * Math.sin(sinArgument));
+			                   getLogger().info("setX : " + amplitude * Math.sin(sinArgument));
+
+			                   // Set new destination
+			                   SSLR.setDestination(destFrame);
+			                   aStep.end(); //stop the measurement
+			                   
+			                   force_data = robot.getExternalForceTorque(robot.getFlange());
+					           force_vec = force_data.getForce();
+					           forceInZ = force_vec.getZ();
+					           
+					           if(forceInZ >= 0)
+					        	   break;
+			               }
+			        	   getLogger().info("Finish For loop");
+			                
 			           }
 			           
 		    	   }		    	   
@@ -425,11 +520,11 @@ public class TexturedHwall_tool extends RoboticsAPIApplication {
 		     }
 		     motion.getRuntime().stopMotion();
 		     if (debug)getLogger().info("ROS Node terminated.");
-		   }
-		
+		   }	
 		
 		   getLogger().info("ROS loop has ended. Application terminated.");		   
 	}
+
 	
 	@Override
 	public void dispose() { // The ROS nodes are killed.
