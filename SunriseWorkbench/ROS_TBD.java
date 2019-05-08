@@ -208,8 +208,8 @@ public class ROS_TBD extends RoboticsAPIApplication {
    cabinet = getController("KUKA_Sunrise_Cabinet_1");
    //lbr = (LBR) getDevice(cabinet, "LBR_iiwa_7_R800_1");
    robot = getContext().getDeviceFromType(LBR.class);
-   tool = getApplicationData().createFromTemplate("Tool");
-   tcp_tool = tool.getFrame("TCP");
+   tool = getApplicationData().createFromTemplate("tool");
+   tcp_tool = tool.getFrame("tool_link_ee");
    tool.attachTo(robot.getFlange());
 
    //front
