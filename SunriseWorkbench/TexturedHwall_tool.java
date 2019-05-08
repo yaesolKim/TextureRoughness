@@ -73,6 +73,7 @@ public class TexturedHwall_tool extends RoboticsAPIApplication {
 	private Lock 			configureSmartServoLock = new ReentrantLock();
 	private double 			initial_velocity = 0.05;
 	private double			force_threshold = -4.0; //-2: cannot contact collision
+	private double			rel_vel; 
 	private boolean 		initSuccessful = false;
 	private boolean 		debug = false;
 	private boolean 		contact = false;
@@ -83,8 +84,6 @@ public class TexturedHwall_tool extends RoboticsAPIApplication {
 	private Frame 			aFrame;
 	private StatisticTimer	timing;
     private final double[]	translationOfTool = { 0, 0, 140 };
-    private final double 	amplitude = 10; //70
-    private final double 	freqency = 0.6;
     private static final int milliSleepToEmulateComputationalEffort = 30;
 	
 	private iiwaMessageGenen helper; //< Helper class to generate iiwa_msgs from current robot state.
@@ -397,36 +396,33 @@ public class TexturedHwall_tool extends RoboticsAPIApplication {
 			           goalFrame.setBetaRad(commandPosition.getPose().getOrientation().getY());
 			           goalFrame.setGammaRad(commandPosition.getPose().getOrientation().getZ());
 			           
+			           rel_vel = commandPosition.getPose().getOrientation().getW()/5000000000L;
+			           
 			           force_data = robot.getExternalForceTorque(robot.getFlange());
 			           force_vec = force_data.getForce();
 			           forceInZ = force_vec.getZ();
 			           
-			           //non-contact state : robot base coordinate
+			           ///////non-contact state : robot base coordinate
 			           if (robot.isReadyToMove()&& (forceInZ > force_threshold)) {			        	   
 			        	   if(contact) //contact == true
 			        	   {
+			        		   // Create a new smart servo motion
 			        		   motion = new SmartServo(robot.getCurrentJointPosition()); //1-1
 			        		   motion.setMinimumTrajectoryExecutionTime(8e-3);
 			        		   motion.setJointVelocityRel(configuration.getDefaultRelativeJointSpeed());
 			        		   motion.setTimeoutAfterGoalReach(300);
 			        		   
-			        		   getLogger().info("Starting the SmartServo in position control mode");			        		   
-			        		   tool.getDefaultMotionFrame().moveAsync(motion);//1-2
-			        		   
-			        		   getLogger().info("Stop the SmartServoLIN motion");
-			        		   SSLR.stopMotion(); //2-5			        		   
-			        		   
-			        		   getLogger().info("Get the runtime of the SmartServo motion");
-			        		   SSR = motion.getRuntime();//1-3			        		   
-			        		  
-				        	   //ThreadUtil.milliSleep(1000);
+			        		   getLogger().info("No Contact");			        		   
+			        		   tool.getDefaultMotionFrame().moveAsync(motion);//1-2: Starting the SmartServo in position control mode
+			        		   SSLR.stopMotion(); //2-5: Stop the SmartServoLIN motion			        		   
+			        		   SSR = motion.getRuntime();//1-3: Get the runtime of the SmartServo motion
 
 			        		   contact = false;
 			        	   }			        	   			   
 			        	   SSR.setDestination(goalFrame);//1-4 
 			           }
 
-			           //contact state : tool coordinate
+			           ///////contact state : tool coordinate
 			           else {
 			        	   if(!contact) //contact == false
 			        	   {
@@ -434,40 +430,33 @@ public class TexturedHwall_tool extends RoboticsAPIApplication {
 			        		   motion_lin = new SmartServoLIN(robot.getCurrentCartesianPosition(robot.getFlange())); //2-1
 			        		   motion_lin.setMinimumTrajectoryExecutionTime(20e-3);
 			        			
-			        		   getLogger().info("Starting the SmartServoLIN in position control mode");
-				               robot.getFlange().moveAsync(motion_lin);//2-2
-				               
-				               getLogger().info("Stop the SmartServo motion");
-			        		   motion.getRuntime().stopMotion(); //1-5
-				               
-			        		   getLogger().info("Get the runtime of the SmartServoLIN motion");
-			        		   SSLR = motion_lin.getRuntime(); //2-3
+			        		   getLogger().info("Contact");
+				               robot.getFlange().moveAsync(motion_lin);//2-2: Starting the SmartServoLIN in position control mode
+			        		   motion.getRuntime().stopMotion(); //1-5: Stop the SmartServo motion
+			        		   SSLR = motion_lin.getRuntime(); //2-3: Get the runtime of the SmartServoLIN motion
 				              
 				               timing = new StatisticTimer();
 				               contact = true;
-				        	   ThreadUtil.milliSleep(1000);   
+				        	   //ThreadUtil.milliSleep(1000);   
 			        	   }
 			        	   
 			        	   aFrame = SSLR.getCurrentCartesianDestination(robot.getFlange());
-			        	   double omega = freqency * 2 * Math.PI * 1e-9;
 			               long startTimeStamp = System.nanoTime();
-			               
+			               double setx = 0;
 			               while (true)
 			               {
 			                   final OneTimeStep aStep = timing.newTimeStep(); //starting an individual measurement
-
 			                   ThreadUtil.milliSleep(milliSleepToEmulateComputationalEffort);
 
 			                   // Update the smart servo LIN runtime
 			                   SSLR.updateWithRealtimeSystem();
-
 			                   double curTime = System.nanoTime() - startTimeStamp;
-			                   double sinArgument = omega * curTime;
 
 			                   // Compute the sine function
 			                   Frame destFrame = new Frame(aFrame);
-			                   destFrame.setX(amplitude * Math.sin(sinArgument));
-			                   getLogger().info("setX : " + amplitude * Math.sin(sinArgument));
+			                   setx += (curTime)*rel_vel;
+			                   destFrame.setX(setx);
+			                   getLogger().info("setx: " + setx);
 
 			                   // Set new destination
 			                   SSLR.setDestination(destFrame);
