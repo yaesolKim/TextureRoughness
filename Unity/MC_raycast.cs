@@ -105,6 +105,8 @@ public class MC_raycast : MonoBehaviour {
 
 				touchable = true;
 
+				ori =  proxy_base.transform.rotation.eulerAngles.y - proxy_wall.transform.rotation.eulerAngles.y + 90;
+
 			}
 
 			else if(target_wall.gameObject.tag == "dynamic_wall")
@@ -145,9 +147,12 @@ public class MC_raycast : MonoBehaviour {
 					a  = a*(-1) + 360;
 				}
 
-				proxy_wall.transform.eulerAngles = new Vector3(-90, a+90+600, 180); //add 600 for distinguishing the dynamic object
+				proxy_wall.transform.eulerAngles = new Vector3(-90, a+90, 180);
 
 				touchable = true;
+
+				ori = proxy_base.transform.rotation.eulerAngles.y -  proxy_wall.transform.rotation.eulerAngles.y + 90 + 600;//add 600 for distinguishing the dynamic object
+
 			}
 
 			else if(target_wall.gameObject.tag == "static_sphere")
@@ -186,6 +191,8 @@ public class MC_raycast : MonoBehaviour {
 
 				proxy_wall.transform.eulerAngles = new Vector3(-90, a+90, 180);
 				touchable = true;
+
+				ori = proxy_base.transform.rotation.eulerAngles.y - proxy_wall.transform.rotation.eulerAngles.y + 90;
 			}
 
 			else
@@ -197,7 +204,7 @@ public class MC_raycast : MonoBehaviour {
 			p_y = 1000*proxy_wall.transform.localPosition.y;
 			p_z = 1000*(proxy_wall.transform.localPosition.z + 0.067f); //iiwa base height
 
-			ori =  proxy_wall.transform.rotation.eulerAngles.y - proxy_base.transform.rotation.eulerAngles.y;
+
 		}
 
 		else
