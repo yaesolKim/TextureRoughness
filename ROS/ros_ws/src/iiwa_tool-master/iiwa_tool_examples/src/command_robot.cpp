@@ -23,13 +23,10 @@ using namespace std;
 
 //Socket comm
 #define BUF_SIZE 28
-#define portnum 9118
+#define portnum 9120
 //#define ros_rate 10.0
 #define threshold 0.2
 #define PI 3.14159265
-
-//nh.param("ros_rate", ros_rate, 0.1); // 0.1 Hz = 10 seconds
-//ros::Rate* loop_rate_ = new ros::Rate(ros_rate);
 
 iiwa_msgs::JointPosition current_joint_position, command_joint_position;
 geometry_msgs::PoseStamped current_cartesian_position, command_cartesian_position;
@@ -38,19 +35,21 @@ std::string joint_position_topic, cartesian_position_topic, command_cartesian_po
 bool isRobotConnected = false, robotInit = false;
 bool use_cartesian_command = true;
 
-float ori = 0; //relative orientation between avatar and virtual wall
-float pos_x, pos_y, pos_z, rough;
-float pos_x_old = 0, pos_y_old = 0, pos_z_old = 0;
+//float ori = 180; //relative orientation between avatar and virtual wall
+float ori, x, y, z, r; //receive from unity
+double pos_x, pos_y, pos_z; //type casting
+int rough; //type casting
+double pos_x_old, pos_y_old, pos_z_old; //calculate using poses
+double theta, v_y, v_z, v;
 
-float tex_angle, tex_vel;
 bool compliant_control = false;
 
 void jointPositionCallback(const iiwa_msgs::JointPosition& jp);
 void cartesianPositionCallback(const geometry_msgs::PoseStamped& ps);
 //void avatarCallback(const geometry_msgs::PoseStamped& ps);
 void error_handling(const char * message); //Socket comm
-void setRobotPose(int ori, float x, float y, float z, int r);
-bool checkReachability(int ori, float x, float y, float z);
+void setRobotPose(float ori, double x, double y, double z, int r, double direction_degree);
+bool checkReachability(float ori, double x, double y, double z);
 
 int main (int argc, char **argv)
 {
@@ -80,6 +79,12 @@ int main (int argc, char **argv)
 	else {
 		ROS_INFO("1. success to creating UDP socket\n");
 	}
+
+	socklen_t optlen;
+	int option;
+	optlen=sizeof(option);
+	option = 1;
+	setsockopt(serv_sock, SOL_SOCKET, SO_REUSEADDR,(void*)&option, optlen);
 
 	// comm: memset
 	memset(&serv_adr, 0, sizeof(serv_adr));
@@ -124,41 +129,36 @@ int main (int argc, char **argv)
 	ros::Publisher pub_cartesian_command = nh.advertise<geometry_msgs::PoseStamped>(command_cartesian_position_topic, 1);
 	ros::Publisher pub_joint_command = nh.advertise<iiwa_msgs::JointPosition>(command_joint_position_topic, 1);
 
-	ROS_INFO("Try Robot connection.");
-	while (ros::ok())
-	{
+	///// robot initialization - done after calibration in Unity
+	while (ros::ok())	{
 		if (isRobotConnected) {
-			ROS_INFO("Robot connected.");
+			ROS_INFO("4. Robot connected.");
+
+			ori = 90.0;
+			pos_x = 750.0;
+			pos_y = 0.0;
+			pos_z = 486.33;
+			rough = 0;
+			theta = 0.0;
+
+			pos_x_old = pos_x;
+			pos_y_old = pos_y;
+			pos_z_old = pos_z;
 
 			command_cartesian_position = current_cartesian_position;
-			setRobotPose(0, 700.0, 0, 486.33, 0); //ori, x, y, z, r
+			setRobotPose(ori, pos_x, pos_y, pos_z, rough, theta);
 			pub_cartesian_command.publish(command_cartesian_position);
 			ROS_INFO("Robot moves backward.");
-			ros::Duration(1.0).sleep();
+			ros::Duration(3.0).sleep();
 
-			robotInit=true;
-
+			robotInit = true;
 			break;
 		}
 		else {
 			ROS_ERROR("Robot is not connected...");
 			ros::Duration(1.0).sleep();
 		}
-	}
-/*
-	// After finishing initialization, move the robot backward.
-	while(ros::ok() && isRobotConnected && use_cartesian_command)
-	{
-		command_cartesian_position = current_cartesian_position;
-		setRobotPose(0, 700.0, 0, 486.33, 0); //ori, x, y, z, r
-		pub_cartesian_command.publish(command_cartesian_position);
-		ROS_INFO("Robot moves backward.");
-		ros::Duration(1.0).sleep();
-
-		robotInit=true;
-		break;
-	}
-	*/
+	} ///// end of the robot initialization
 
 	//start haptic loop
 	while (ros::ok() && robotInit)
@@ -168,12 +168,11 @@ int main (int argc, char **argv)
 			//waiting for message from UNITY. if there is no message, hold robot configuration and wait
 			//printf("waiting for message from UNITY!\n");
 			str_len = recvfrom(serv_sock, message_rec, 20, 0, (struct sockaddr *)&clnt_adr, &clnt_adr_sz);
-			//str_len = recv(clnt_sock, message_rec, 20, 0);
-			memcpy(&ori,		&message_rec,			sizeof(ori));
-			memcpy(&pos_x,	&message_rec[4],	sizeof(pos_x));
-			memcpy(&pos_y,	&message_rec[8],	sizeof(pos_y));
-			memcpy(&pos_z,	&message_rec[12],	sizeof(pos_z));
-			memcpy(&rough,	&message_rec[16],	sizeof(rough));
+			memcpy(&ori,	&message_rec,			sizeof(ori));
+			memcpy(&x,	&message_rec[4],	sizeof(x));
+			memcpy(&y,	&message_rec[8],	sizeof(y));
+			memcpy(&z,	&message_rec[12],	sizeof(z));
+			memcpy(&r,	&message_rec[16],	sizeof(r));
 			//message_rec[str_len] = 0;
 
 			//control mode is decided by size of the ori
@@ -182,25 +181,28 @@ int main (int argc, char **argv)
 				compliant_control = true;
 				ori = ori - 600;
 			}
-
 			else //static object
 			{
 				compliant_control = false;
 			}
 
+			pos_x = x;
+			pos_y = y;
+			pos_z = z;
+
+			v_y = pos_y - pos_y_old;
+			v_z = pos_z - pos_z_old;
+			v = sqrt(pow(v_y, 2) + pow(v_z, 2));
+			theta = (asin(v_z/v)*180) / PI;
+			rough = int(r);
+
+			//Check reachability roughly. TODO: add HWALL code later
 			if(pos_x_old != pos_x || pos_y_old != pos_y || pos_z_old != pos_z)
 			{
-				setRobotPose(ori, pos_x, pos_y, pos_z, rough);
-				ROS_INFO("set pos x: %f, y: %f, z: %f", command_cartesian_position.pose.position.x, command_cartesian_position.pose.position.y, command_cartesian_position.pose.position.z);
-				ROS_INFO("set ori x: %f, y: %f, z: %f, w:%f", command_cartesian_position.pose.orientation.x, command_cartesian_position.pose.orientation.y, command_cartesian_position.pose.orientation.z, command_cartesian_position.pose.orientation.w);
+				setRobotPose(ori, pos_x, pos_y, pos_z, rough, theta);
+				//ROS_INFO("set pos x: %f, y: %f, z: %f", command_cartesian_position.pose.position.x, command_cartesian_position.pose.position.y, command_cartesian_position.pose.position.z);
 			}
 
-			pos_x_old = pos_x;
-			pos_y_old = pos_y;
-			pos_z_old = pos_z;
-
-			//command_cartesian_position = current_cartesian_position;
-			//setRobotPose(ori, pos_x, pos_y, pos_z, rough);
 			bool reachable = checkReachability(ori, pos_x, pos_y, pos_z);
 
 			if(!compliant_control)
@@ -208,6 +210,7 @@ int main (int argc, char **argv)
 				if(reachable)
 				{
 					pub_cartesian_command.publish(command_cartesian_position);
+					//ROS_INFO("publish ori x: %f", ori);
 				}
 			}
 
@@ -232,66 +235,74 @@ int main (int argc, char **argv)
 				config.request.mode.cartesian_damping.damping.b = 0.7;
 				config.request.mode.cartesian_damping.damping.c = 0.7;
 
-				pub_cartesian_command.publish(command_cartesian_position);
+				//pub_cartesian_command.publish(command_cartesian_position);
 
 				client.call(config);
-			}}
-		}//end of the haptic loop
+			}
 
-
-		std::cerr<<"Stopping spinner..."<<std::endl;
-		spinner.stop();
-
-		std::cerr<<"Bye!"<<std::endl;
-
-		return 0;
-
-	};
-	/////////////////////////////end of the main//////////////////////////
-
-	void setRobotPose(int ori, float x, float y, float z, int r)
-	{
-		command_cartesian_position.pose.position.x = x;
-		command_cartesian_position.pose.position.y = y;
-		command_cartesian_position.pose.position.z = z;
-
-//		command_cartesian_position.pose.orientation.x = (22.5 * floor(r/10)*PI)/180; // relative angle!!! 0,1,2,3,4
-		command_cartesian_position.pose.orientation.x = 0.0; //0.0, 22.5, 45, 67.5, 90
-		command_cartesian_position.pose.orientation.y = 1.5708;
-		command_cartesian_position.pose.orientation.z = (ori*PI)/180; //ori in radian
-
-		command_cartesian_position.pose.orientation.w = r % 10; //TODO: relative velocity!!!
-	}
-
-	bool checkReachability(int ori, float x, float y, float z)
-	{
-		bool reach = false;
-		if(x>-800 && x<800 && y>-800 && y<800 && z>0 && z<1200 )
-		{
-			reach = true;
+			pos_x_old = pos_x;
+			pos_y_old = pos_y;
+			pos_z_old = pos_z;
 		}
+	}//end of the haptic loop
 
-		return reach;
-	}
 
-	void jointPositionCallback(const iiwa_msgs::JointPosition& jp)
+	std::cerr<<"Stopping spinner..."<<std::endl;
+	spinner.stop();
+
+	std::cerr<<"Bye!"<<std::endl;
+
+	return 0;
+
+};
+/////////////////////////////end of the main//////////////////////////
+
+void setRobotPose(float ori_, double x_, double y_, double z_, int r_, double direction_degree)
+{
+	command_cartesian_position.pose.position.x = x_;
+	command_cartesian_position.pose.position.y = y_;
+	command_cartesian_position.pose.position.z = z_;
+
+	/*
+	if(ori_<0) {
+	ori_ = ori_ + 180;
+}
+*/
+command_cartesian_position.pose.orientation.x = (ori_*PI)/180; //ori in radian
+command_cartesian_position.pose.orientation.y = ((22.5 * floor(r_/10) - direction_degree) * PI)/180; // relative angle!!! 0,1,2,3,4
+command_cartesian_position.pose.orientation.z = 1.5708; //fix this value for vertical surface
+command_cartesian_position.pose.orientation.w = r_ % 10; //velocity-only this value in contact mode
+}
+
+bool checkReachability(float ori, double x, double y, double z)
+{
+	bool reach = false;
+	if(x>-800 && x<800 && y>-800 && y<800 && z>0 && z<1200 )
 	{
-		if (!isRobotConnected)
-		isRobotConnected = !isRobotConnected;
-		current_joint_position = jp;
+		reach = true;
 	}
 
-	void cartesianPositionCallback(const geometry_msgs::PoseStamped& ps)
-	{
-		if (!isRobotConnected)
-		isRobotConnected = !isRobotConnected;
-		current_cartesian_position = ps;
-	}
+	return reach;
+}
 
-	//Socket comm
-	void error_handling(const char * message)
-	{
-		fputs(message, stderr);
-		fputc('\n', stderr);
-		exit(1);
-	}
+void jointPositionCallback(const iiwa_msgs::JointPosition& jp)
+{
+	if (!isRobotConnected)
+	isRobotConnected = !isRobotConnected;
+	current_joint_position = jp;
+}
+
+void cartesianPositionCallback(const geometry_msgs::PoseStamped& ps)
+{
+	if (!isRobotConnected)
+	isRobotConnected = !isRobotConnected;
+	current_cartesian_position = ps;
+}
+
+//Socket comm
+void error_handling(const char * message)
+{
+	fputs(message, stderr);
+	fputc('\n', stderr);
+	exit(1);
+}
