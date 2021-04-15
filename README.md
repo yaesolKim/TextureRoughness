@@ -2,6 +2,10 @@
 
 IIWA - ROS - UNITY    
 
+***
+## Further information    
+For the further information, please refer to the paper and video below:
+
 
 ***
 ## Citation   
