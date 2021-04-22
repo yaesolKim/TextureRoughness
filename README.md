@@ -1,6 +1,12 @@
 # Haptic Wall
 
-IIWA - ROS - UNITY    
+Encountered-type Haptic Display using Cooperative robot!        
+        
+        
+![VR](https://github.com/yaesolKim/hwall/doc/CAVW-18-0061.png)
+
+
+    
 
 ***
 ## Further information    
