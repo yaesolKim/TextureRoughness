@@ -12,7 +12,7 @@ Encountered-type Haptic Display using Cooperative robot!
 ## Further information    
 For the further information, please refer to the paper and video below:     
 
-[![image](./doc/paper.png){: width="30%" height="30%"}](https://onlinelibrary.wiley.com/doi/full/10.1002/cav.1814)&nbsp;&nbsp;
+[![image](./doc/paper.PNG){: width="30%" height="30%"}](https://onlinelibrary.wiley.com/doi/full/10.1002/cav.1814)&nbsp;&nbsp;
 [![Video Label](http://img.youtube.com/vi/-h38wILV3OM/0.jpg){: width="50%" height="50%"}](https://youtu.be/-h38wILV3OM)
 
 
